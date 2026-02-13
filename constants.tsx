@@ -1,0 +1,510 @@
+
+import React from 'react';
+import { LayoutDashboard, ClipboardList, Settings } from 'lucide-react';
+import { ChecklistItem } from './types';
+
+export const SIDEBAR_ITEMS = [
+  { id: 'overview', label: 'Visão Geral', icon: <LayoutDashboard size={20} /> },
+  { id: 'checklist', label: 'Checklist', icon: <ClipboardList size={20} /> },
+  { id: 'settings', label: 'Configurações', icon: <Settings size={20} /> },
+];
+
+// Checklist — Sistema de Atendimento SaaS (estilo Digisac/Zendesk)
+// Todas as tarefas (PRONTO + FALTA) com card na UI
+export const TECHNICAL_CHECKLIST: ChecklistItem[] = [
+  // ========== PRONTO: WhatsApp e Canais ==========
+  {
+    id: 'wa-1',
+    label: 'Integração UAZAPI (webhook, envio e recebimento)',
+    status: 'done',
+    category: 'WhatsApp e Canais',
+    location: 'src/app/api/webhooks/uazapi/route.ts',
+    impactedFiles: ['uazapi/route.ts', 'process-webhook/index.ts', 'send-message/route.ts'],
+    description: 'Integração completa do webhook UAZAPI; process-webhook e send-message (Edge).',
+  },
+  {
+    id: 'wa-2',
+    label: 'Múltiplas instâncias por empresa (QR Code, status)',
+    status: 'done',
+    category: 'WhatsApp e Canais',
+    location: 'src/app/dashboard/instancias/page.tsx',
+    impactedFiles: ['instancias/page.tsx', 'instances (db table)'],
+    description: 'Gestão multi-instância vinculada ao company_id e seller_id com status em tempo real.',
+  },
+  {
+    id: 'wa-3',
+    label: 'Recebimento de mensagens → salva em messages e cria/atualiza leads',
+    status: 'done',
+    category: 'WhatsApp e Canais',
+    description: 'Webhooks salvam em messages e criam/atualizam leads com seller_id da instância quando existir.',
+  },
+  {
+    id: 'wa-4',
+    label: 'Envio de mensagens pela plataforma (Conversas + API/Edge)',
+    status: 'done',
+    category: 'WhatsApp e Canais',
+    description: 'Tela Conversas chama Edge send-message; API send-message usa lead + instance.',
+  },
+  {
+    id: 'wa-5',
+    label: 'Normalização de número (código país 55)',
+    status: 'done',
+    category: 'WhatsApp e Canais',
+    description: 'Tratamento nos webhooks e no envio.',
+  },
+
+  // ========== PRONTO: Caixa de Entrada / Conversas ==========
+  {
+    id: 'in-1',
+    label: 'Listagem de conversas por lead (última msg, data)',
+    status: 'done',
+    category: 'Caixa de Entrada / Conversas',
+    location: 'src/app/dashboard/conversas/page.tsx',
+    description: 'Query em leads com agregação de última mensagem para listagem estilo WhatsApp.',
+  },
+  {
+    id: 'in-2',
+    label: 'Histórico de mensagens por conversa',
+    status: 'done',
+    category: 'Caixa de Entrada / Conversas',
+    description: 'Carrega messages por lead_id.',
+  },
+  {
+    id: 'in-3',
+    label: 'Enviar mensagem de texto na conversa',
+    status: 'done',
+    category: 'Caixa de Entrada / Conversas',
+    description: 'sendMessage (edge) com lead_id + texto.',
+  },
+  {
+    id: 'in-4',
+    label: 'Busca por nome/telefone',
+    status: 'done',
+    category: 'Caixa de Entrada / Conversas',
+    description: 'Filtro na listagem de conversas (searchTerm).',
+  },
+  {
+    id: 'in-5',
+    label: 'Filtro por vendedor e por "não lidas"',
+    status: 'done',
+    category: 'Caixa de Entrada / Conversas',
+    description: 'listFilter (all / unread / by_seller) e sellerFilter; interface usa seller_id e contagem de não lidas.',
+  },
+
+  // ========== PRONTO: Leads ==========
+  {
+    id: 'lead-1',
+    label: 'Listagem de leads com status',
+    status: 'done',
+    category: 'Leads',
+    location: 'src/app/dashboard/leads/page.tsx',
+    description: 'Tabela leads (status, seller_id, etc.).',
+  },
+  {
+    id: 'lead-2',
+    label: 'Lead vinculado a vendedor (seller_id)',
+    status: 'done',
+    category: 'Leads',
+    description: 'Coluna leads.seller_id; webhooks e send-message usam para rotear.',
+  },
+  {
+    id: 'lead-3',
+    label: 'Contagem de mensagens por lead',
+    status: 'done',
+    category: 'Leads',
+    description: 'Exibida na listagem de leads/conversas.',
+  },
+
+  // ========== PRONTO: Usuários, Cargos e Acessos ==========
+  {
+    id: 'user-1',
+    label: 'Criar, editar e listar usuários (por empresa)',
+    status: 'done',
+    category: 'Usuários, Cargos e Acessos',
+    location: 'src/app/dashboard/usuarios/page.tsx',
+    description: 'Tabela users (company_id, role_id).',
+  },
+  {
+    id: 'user-2',
+    label: 'Criar e editar cargos (roles) por empresa',
+    status: 'done',
+    category: 'Usuários, Cargos e Acessos',
+    description: 'Configurações → Cargos e Acessos; tabela roles e role_permissions.',
+  },
+  {
+    id: 'user-3',
+    label: 'Lista de permissões e atribuição de permissões por cargo',
+    status: 'done',
+    category: 'Usuários, Cargos e Acessos',
+    description: 'src/app/api/admin/initialize/route.ts (seed de permissions); configurações.',
+  },
+  {
+    id: 'user-4',
+    label: 'Usuário com um cargo; permissões derivadas do cargo',
+    status: 'done',
+    category: 'Usuários, Cargos e Acessos',
+    description: 'users.role_id → roles → role_permissions; API /api/auth/me retorna permissões.',
+  },
+  {
+    id: 'user-5',
+    label: 'Controle de acesso por tela (sidebar e rotas conforme permissões)',
+    status: 'done',
+    category: 'Usuários, Cargos e Acessos',
+    location: 'src/components/dashboard/Sidebar.tsx',
+    description: 'requiredAny por item; rotas checam permissão.',
+  },
+  {
+    id: 'user-6',
+    label: 'Regras por cargo (admin, supervisor, vendedor, leitor)',
+    status: 'done',
+    category: 'Usuários, Cargos e Acessos',
+    description: 'Seed de roles com conjuntos de permissões; fallback quando não vêm do banco.',
+  },
+  {
+    id: 'user-7',
+    label: 'Tela de configurações (Perfil, Permissões, Cargos, Usuários)',
+    status: 'done',
+    category: 'Usuários, Cargos e Acessos',
+    location: 'src/app/dashboard/configuracoes/page.tsx',
+    description: 'Configurações centralizadas.',
+  },
+  {
+    id: 'user-8',
+    label: 'Multi-tenant (tudo por company_id)',
+    status: 'done',
+    category: 'Usuários, Cargos e Acessos',
+    description: 'Queries filtram por company_id do usuário logado.',
+  },
+
+  // ========== PRONTO: Automação e IA ==========
+  {
+    id: 'ai-1',
+    label: 'Resposta automática a saudação (Mistral)',
+    status: 'done',
+    category: 'Automação e IA',
+    description: 'Webhook/Edge: análise de intenção; se greeting, responde automaticamente.',
+  },
+  {
+    id: 'ai-2',
+    label: 'Detecção de intenção de agendamento → cria registro em appointments',
+    status: 'done',
+    category: 'Automação e IA',
+    description: 'Webhook/process-webhook: intent "appointment" → insert em appointments.',
+  },
+  {
+    id: 'ai-3',
+    label: 'Análise de intenção (Mistral)',
+    status: 'done',
+    category: 'Automação e IA',
+    description: 'Intent, confidence, extractedData no fluxo.',
+  },
+
+  // ========== PRONTO: Outros ==========
+  {
+    id: 'other-1',
+    label: 'Dashboard (Overview) com totais (leads, mensagens, agendamentos)',
+    status: 'done',
+    category: 'Outros',
+    location: 'src/app/dashboard/page.tsx',
+    description: 'Cards com contagens.',
+  },
+  {
+    id: 'other-2',
+    label: 'Página de instâncias WhatsApp (criar, conectar, sincronizar status)',
+    status: 'done',
+    category: 'Outros',
+    location: 'src/app/dashboard/instancias/page.tsx',
+    description: 'Gestão de instâncias por empresa.',
+  },
+  {
+    id: 'other-3',
+    label: 'Tabela sellers e vínculo com instâncias/leads',
+    status: 'done',
+    category: 'Outros',
+    description: 'sellers por company; instances.seller_id, leads.seller_id; message-router.ts (ainda não ligado ao webhook).',
+  },
+
+  // ========== FALTA: Fila e Distribuição ==========
+  {
+    id: 'dist-1',
+    label: 'Fila de conversas "não atendidas"',
+    status: 'pending',
+    category: 'Fila e Distribuição',
+    priority: 'Alta',
+    description: 'Filtro/aba "Fila" na Conversas = leads com seller_id null (ou status fila). Query: leads onde company_id = user e seller_id is null, ordenar por última mensagem. UI: abas "Todas" / "Fila" / "Minhas".',
+  },
+  {
+    id: 'dist-2',
+    label: 'Botão "Pegar conversa"',
+    status: 'pending',
+    category: 'Fila e Distribuição',
+    priority: 'Alta',
+    description: 'Na linha da conversa ou ao abrir: botão "Pegar conversa". API PATCH em lead (ex.: /api/leads/[id]/assign) setando seller_id = user atual e status em_atendimento.',
+  },
+  {
+    id: 'dist-3',
+    label: 'Atribuir conversa manualmente a um atendente',
+    status: 'pending',
+    category: 'Fila e Distribuição',
+    priority: 'Alta',
+    description: 'Dropdown "Atribuir a…" com lista de atendentes (sellers ou users com permissão); mesma API de atribuição.',
+  },
+  {
+    id: 'dist-4',
+    label: 'Distribuição automática (round-robin ao chegar mensagem)',
+    status: 'pending',
+    category: 'Fila e Distribuição',
+    priority: 'Alta',
+    description: 'No webhook, após upsert do lead e insert da mensagem, chamar message-router ou lógica inline (selectAvailableSeller); setar leads.seller_id. Integrar em process-webhook / uazapi/route.ts.',
+  },
+  {
+    id: 'dist-5',
+    label: '(Opcional) Limite de conversas em atendimento por usuário',
+    status: 'pending',
+    category: 'Fila e Distribuição',
+    priority: 'Média',
+    description: 'Config por empresa (max_conversations_per_agent); ao distribuir ou "pegar conversa", checar contagem de leads com seller_id = X e status em_atendimento; bloquear se >= limite.',
+  },
+
+  // ========== FALTA: Status e Fluxo ==========
+  {
+    id: 'flow-1',
+    label: 'Status da conversa (Fila | Em atendimento | Aguardando cliente | Fechada)',
+    status: 'doing',
+    category: 'Status e Fluxo',
+    priority: 'Alta',
+    description: 'Adicionar coluna conversation_status em leads (enum ou text). Migração SQL; em toda atribuição/transferência/encerrar atualizar esse campo. Exibir na UI (badge ou select).',
+  },
+  {
+    id: 'flow-2',
+    label: 'Transferir conversa para outro atendente',
+    status: 'pending',
+    category: 'Status e Fluxo',
+    priority: 'Alta',
+    description: 'Botão "Transferir" → seleção do novo atendente → API atualiza leads.seller_id. Opcional: tabela conversation_transfers (lead_id, from_seller, to_seller, at).',
+  },
+  {
+    id: 'flow-3',
+    label: 'Botão "Encerrar atendimento"',
+    status: 'pending',
+    category: 'Status e Fluxo',
+    priority: 'Alta',
+    description: 'Botão no cabeçalho da conversa; API seta conversation_status = fechada e opcionalmente seller_id = null.',
+  },
+  {
+    id: 'flow-4',
+    label: 'Regra: nova mensagem em conversa fechada → reabre na fila',
+    status: 'pending',
+    category: 'Status e Fluxo',
+    priority: 'Alta',
+    description: 'No webhook, ao inserir mensagem inbound: se lead.conversation_status === "fechada", update em leads setando status fila e seller_id null.',
+  },
+  {
+    id: 'flow-5',
+    label: 'Unificar "atendente" (user vs seller) na atribuição',
+    status: 'pending',
+    category: 'Status e Fluxo',
+    priority: 'Alta',
+    description: 'Decisão: (A) manter seller_id e mapear user → seller (sellers.user_id); (B) usar assigned_user_id em leads. Na UI mostrar "Atendente" e listar quem pode pegar conversa.',
+  },
+
+  // ========== FALTA: Tempo Real ==========
+  {
+    id: 'rt-1',
+    label: 'Realtime: novas mensagens sem recarregar',
+    status: 'doing',
+    category: 'Tempo Real',
+    priority: 'Alta',
+    description: 'Supabase Realtime: channel("messages").on("postgres_changes", { event: "INSERT", table: "messages" }). No callback: atualizar lista de mensagens e última mensagem na lista de conversas. RLS e filtro por company_id/lead_id.',
+  },
+  {
+    id: 'rt-2',
+    label: '(Opcional) Notificação sonora ou push',
+    status: 'pending',
+    category: 'Tempo Real',
+    priority: 'Média',
+    description: 'Ao receber INSERT em messages (realtime), tocar áudio e/ou Notifications API do browser.',
+  },
+  {
+    id: 'rt-3',
+    label: 'Badge/contador de não lidas em tempo real',
+    status: 'pending',
+    category: 'Tempo Real',
+    priority: 'Alta',
+    description: 'Com Realtime em messages, ao INSERT marcar conversa como não lida e atualizar contador no sidebar ou no título da aba.',
+  },
+
+  // ========== FALTA: Experiência do Atendente ==========
+  {
+    id: 'ux-1',
+    label: 'Respostas rápidas / templates por empresa',
+    status: 'pending',
+    category: 'Experiência do Atendente',
+    priority: 'Alta',
+    description: 'Tabela message_templates (company_id, name, body). Config para CRUD; na conversa, dropdown "Inserir template" que cola body no campo de texto ou envia direto.',
+  },
+  {
+    id: 'ux-2',
+    label: 'Tags/etiquetas em conversa ou lead',
+    status: 'pending',
+    category: 'Experiência do Atendente',
+    priority: 'Média',
+    description: 'Tabela tags (company_id, name) e lead_tags (lead_id, tag_id); ou coluna leads.tags (array). UI: multiselect na conversa ou no perfil do lead; filtro na lista por tag.',
+  },
+  {
+    id: 'ux-3',
+    label: 'Horário comercial + mensagem fora do horário',
+    status: 'pending',
+    category: 'Experiência do Atendente',
+    priority: 'Média',
+    description: 'Config por empresa (início/fim, timezone); no webhook, ao receber mensagem, verificar horário; se fora, enviar mensagem automática (template) e opcionalmente não atribuir à fila até o próximo dia.',
+  },
+  {
+    id: 'ux-4',
+    label: '(Opcional) Indicador "digitando"',
+    status: 'pending',
+    category: 'Experiência do Atendente',
+    priority: 'Baixa',
+    description: 'Se UAZAPI suportar, enviar evento "typing" ao digitar; exibir "Cliente está digitando" quando o webhook receber esse evento (salvar tipo em messages e exibir na UI).',
+  },
+
+  // ========== FALTA: Agenda ==========
+  {
+    id: 'cal-1',
+    label: 'Página Agenda (rota existe, página não)',
+    status: 'pending',
+    category: 'Agenda',
+    priority: 'Alta',
+    location: 'src/app/dashboard/agenda/page.tsx',
+    description: 'Criar página. Listar appointments (company_id, join em leads); filtro por data, status; editar data/hora/status; criar novo agendamento.',
+  },
+  {
+    id: 'cal-2',
+    label: 'Listar e editar agendamentos',
+    status: 'pending',
+    category: 'Agenda',
+    priority: 'Alta',
+    description: 'API GET/PATCH para appointments; formulário na página Agenda (modal ou inline).',
+  },
+  {
+    id: 'cal-3',
+    label: '(Opcional) Botão "Agendar" na conversa',
+    status: 'pending',
+    category: 'Agenda',
+    priority: 'Média',
+    description: 'Botão no cabeçalho da conversa abre modal com lead pré-preenchido e campos data/hora; POST em appointments.',
+  },
+
+  // ========== FALTA: Relatórios e Métricas ==========
+  {
+    id: 'rep-1',
+    label: 'Tempo até primeira resposta',
+    status: 'pending',
+    category: 'Relatórios e Métricas',
+    priority: 'Média',
+    description: 'Por conversa: primeira msg do cliente (inbound) vs primeira msg do atendente (outbound) após ela; diferença em minutos. Média por atendente/período.',
+  },
+  {
+    id: 'rep-2',
+    label: 'Tempo de resolução / duração do atendimento',
+    status: 'pending',
+    category: 'Relatórios e Métricas',
+    priority: 'Média',
+    description: 'Timestamp de quando status foi para em_atendimento até fechada (ex.: tabela de histórico de status ou campo resolved_at ao fechar).',
+  },
+  {
+    id: 'rep-3',
+    label: 'Volume por atendente',
+    status: 'pending',
+    category: 'Relatórios e Métricas',
+    priority: 'Média',
+    description: 'Contar leads com seller_id = X e status fechada no período; contar mensagens outbound por sender_id ou por lead atribuído.',
+  },
+  {
+    id: 'rep-4',
+    label: 'Página Analytics com gráficos',
+    status: 'pending',
+    category: 'Relatórios e Métricas',
+    priority: 'Média',
+    location: 'src/app/dashboard/analytics/page.tsx',
+    description: 'Gráficos (ex.: recharts): leads novos, mensagens por dia, atendimentos por atendente, tempo médio 1ª resposta.',
+  },
+  {
+    id: 'rep-5',
+    label: '(Opcional) Exportação CSV/Excel',
+    status: 'pending',
+    category: 'Relatórios e Métricas',
+    priority: 'Baixa',
+    description: 'Botão "Exportar" que gera CSV (leads, conversas, métricas) via API e download.',
+  },
+
+  // ========== FALTA: Mídia ==========
+  {
+    id: 'med-1',
+    label: 'Exibir imagem/áudio/documento recebido',
+    status: 'pending',
+    category: 'Mídia',
+    priority: 'Alta',
+    description: 'Webhook já pode salvar media_url e tipo em messages. Na listagem de mensagens na conversa, renderizar img, player de áudio ou link para download conforme tipo.',
+  },
+  {
+    id: 'med-2',
+    label: 'Enviar mídia (imagem, PDF) pela interface',
+    status: 'pending',
+    category: 'Mídia',
+    priority: 'Alta',
+    description: 'Input file na tela de conversa; upload para storage (Supabase) ou envio direto para UAZAPI; chamar endpoint de envio de mídia da UAZAPI com caption opcional.',
+  },
+
+  // ========== FALTA: Bot e Handoff ==========
+  {
+    id: 'bot-1',
+    label: 'Regras configuráveis de quando o bot responde',
+    status: 'pending',
+    category: 'Bot e Handoff',
+    priority: 'Média',
+    description: 'Config por empresa: além de "greeting", definir intenções (FAQ, horário) que disparam resposta automática; no webhook, antes de colocar na fila, checar intenção e responder se configurado.',
+  },
+  {
+    id: 'bot-2',
+    label: 'Handoff bot → humano',
+    status: 'pending',
+    category: 'Bot e Handoff',
+    priority: 'Média',
+    description: 'Detectar intenção "falar com humano" ou "atendente"; não responder com bot, setar lead na fila (seller_id null, status fila) para atendente pegar.',
+  },
+  {
+    id: 'bot-3',
+    label: '(Opcional) Marcar "resolvido pelo bot"',
+    status: 'pending',
+    category: 'Bot e Handoff',
+    priority: 'Baixa',
+    description: 'Campo em lead ou em mensagem (ex.: resolved_by_bot); quando o bot responde e a conversa não vai para fila, marcar; usar em relatório "% resolvido pelo bot".',
+  },
+
+  // ========== FALTA: Ajustes e Robustez ==========
+  {
+    id: 'adj-1',
+    label: 'Deixar "atendente" claro na UI',
+    status: 'pending',
+    category: 'Ajustes e Robustez',
+    priority: 'Média',
+    description: 'Labels "Atendente" em vez de "Vendedor" onde fizer sentido; tooltip ou texto de ajuda explicando quem pode pegar conversas.',
+  },
+  {
+    id: 'adj-2',
+    label: '(Opcional) Política de senha, 2FA, auditoria de acesso',
+    status: 'pending',
+    category: 'Ajustes e Robustez',
+    priority: 'Baixa',
+    description: 'Política de senha (Supabase Auth); 2FA se suportado; tabela audit_log para ações sensíveis (login, alteração de permissões).',
+  },
+  {
+    id: 'adj-3',
+    label: 'Unificar fluxo de envio e tratamento de erro UAZAPI',
+    status: 'pending',
+    category: 'Ajustes e Robustez',
+    priority: 'Média',
+    description: 'Um único ponto de envio (Edge ou API); retry e mensagem de erro amigável na UI quando UAZAPI falhar; log de falhas.',
+  },
+];
