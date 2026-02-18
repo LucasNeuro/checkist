@@ -69,12 +69,24 @@ export async function getRepoFromSupabase(): Promise<RepoConfig | null> {
 export async function setRepoInSupabase(config: RepoConfig): Promise<boolean> {
   if (!supabase) return false;
   try {
-    const { error } = await supabase.from('project_repo').insert({
-      repo_url: config.repoUrl,
-      owner: config.owner,
-      repo_name: config.repoName,
-    });
-    return !error;
+    const { data: repoRow, error: insertError } = await supabase
+      .from('project_repo')
+      .insert({
+        repo_url: config.repoUrl,
+        owner: config.owner,
+        repo_name: config.repoName,
+      })
+      .select('id')
+      .single();
+
+    if (insertError || !repoRow?.id) return false;
+
+    // Vincular todas as tarefas a este repositório
+    const { error: updateError } = await supabase
+      .from('checklist_tasks')
+      .update({ repo_id: repoRow.id });
+
+    return !updateError;
   } catch {
     return false;
   }
@@ -99,15 +111,32 @@ export async function getStateFromSupabase(): Promise<Record<string, ItemStatus>
 export async function setStateInSupabase(state: Record<string, ItemStatus>): Promise<boolean> {
   if (!supabase) return false;
   try {
+    let anyError = false;
     for (const [task_id, status] of Object.entries(state)) {
-      await supabase.from('checklist_state').upsert(
+      const { error } = await supabase.from('checklist_state').upsert(
         { task_id, status, updated_at: new Date().toISOString() },
         { onConflict: 'task_id' }
       );
+      if (error) anyError = true;
     }
-    return true;
+    return !anyError;
   } catch {
     return false;
+  }
+}
+
+/** Garante que todas as tarefas do app existam em checklist_tasks (para estado e atribuições persistirem). */
+export async function ensureChecklistTasksExist(
+  items: { id: string; label: string; category: string }[]
+): Promise<void> {
+  if (!supabase || items.length === 0) return;
+  try {
+    const { error } = await supabase
+      .from('checklist_tasks')
+      .upsert(items, { onConflict: 'id', ignoreDuplicates: true });
+    if (error) console.warn('[stateService] ensureChecklistTasksExist:', error.message);
+  } catch (e) {
+    console.warn('[stateService] ensureChecklistTasksExist:', e);
   }
 }
 
@@ -124,12 +153,13 @@ export async function setRepo(config: RepoConfig): Promise<void> {
 }
 
 export async function getState(): Promise<Record<string, ItemStatus>> {
-  const state = await getStateFromSupabase();
-  if (Object.keys(state).length > 0) return state;
-  return getStateFromStorage();
+  const fromDb = await getStateFromSupabase();
+  const fromStorage = getStateFromStorage();
+  return { ...fromStorage, ...fromDb };
 }
 
 export async function setState(state: Record<string, ItemStatus>): Promise<void> {
   const ok = await setStateInSupabase(state);
-  if (!ok) setStateInStorage(state);
+  setStateInStorage(state);
+  if (!ok) console.warn('[stateService] setState: Supabase falhou, estado salvo no navegador (localStorage).');
 }

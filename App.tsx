@@ -22,15 +22,22 @@ import {
   AlertCircle,
   Database,
   Smartphone,
-  FileDown
+  FileDown,
+  DollarSign,
+  Target,
+  UserPlus
 } from 'lucide-react';
 import { TECHNICAL_CHECKLIST } from './constants';
 import { ChecklistItem, ItemStatus, FilterType, ProjectStats } from './types';
 import { sendWebhookEvent } from './services/webhookService';
 import { parseRepoUrl, fetchRepoInfo, fetchLastCommit, type RepoInfo } from './services/githubService';
-import { getRepo, setRepo, getState, setState, type RepoConfig } from './services/stateService';
+import { getRepo, setRepo, getState, setState, ensureChecklistTasksExist, type RepoConfig } from './services/stateService';
 import { downloadChecklistPdf } from './services/pdfReportService';
+import { getAllEstimates, type TaskEstimate } from './services/estimatesService';
+import { getCollaborators, getAssignments, setAssignment, type Collaborator } from './services/collaboratorsService';
 import { ChecklistInfographic } from './components/ChecklistInfographic';
+import { EstimateModal } from './components/EstimateModal';
+import { CollaboratorsSidebar } from './components/CollaboratorsSidebar';
 
 const App: React.FC = () => {
   const [items, setItems] = useState<ChecklistItem[]>(TECHNICAL_CHECKLIST);
@@ -44,6 +51,30 @@ const App: React.FC = () => {
   const [repoUrlInput, setRepoUrlInput] = useState('');
   const [repoSaving, setRepoSaving] = useState(false);
   const [lastCommit, setLastCommit] = useState<{ sha: string; message: string; date: string } | null>(null);
+  const [estimates, setEstimates] = useState<Record<string, TaskEstimate>>({});
+  const [estimateModalTask, setEstimateModalTask] = useState<ChecklistItem | null>(null);
+  const [collaborators, setCollaborators] = useState<Collaborator[]>([]);
+  const [assignments, setAssignmentsState] = useState<Record<string, string>>({});
+  const [sidebarCollaboratorsOpen, setSidebarCollaboratorsOpen] = useState(false);
+  const [assignedFilter, setAssignedFilter] = useState<string>('');
+  const [bulkAssignByCategory, setBulkAssignByCategory] = useState<Record<string, string>>({});
+  const [bulkStatusByCategory, setBulkStatusByCategory] = useState<Record<string, string>>({});
+
+  // Cores distintas por colaborador (índice estável)
+  const COLLABORATOR_COLORS = [
+    'bg-indigo-100 text-indigo-800 border-indigo-200',
+    'bg-emerald-100 text-emerald-800 border-emerald-200',
+    'bg-amber-100 text-amber-800 border-amber-200',
+    'bg-violet-100 text-violet-800 border-violet-200',
+    'bg-rose-100 text-rose-800 border-rose-200',
+    'bg-sky-100 text-sky-800 border-sky-200',
+    'bg-teal-100 text-teal-800 border-teal-200',
+    'bg-fuchsia-100 text-fuchsia-800 border-fuchsia-200',
+  ];
+  const getCollaboratorColor = (collaboratorId: string) => {
+    const idx = collaborators.findIndex(c => c.id === collaboratorId);
+    return idx >= 0 ? COLLABORATOR_COLORS[idx % COLLABORATOR_COLORS.length] : 'bg-slate-100 text-slate-600 border-slate-200';
+  };
 
   const stats = useMemo((): ProjectStats => {
     const total = items.length;
@@ -67,10 +98,20 @@ const App: React.FC = () => {
       const config = await getRepo();
       if (config) setRepoConfig(config);
 
+      // Garantir que todas as tarefas existam no banco (para status e atribuição persistirem)
+      await ensureChecklistTasksExist(
+        TECHNICAL_CHECKLIST.map((i) => ({ id: i.id, label: i.label, category: i.category }))
+      );
+
       const stateMap = await getState();
       if (Object.keys(stateMap).length > 0) {
         setItems(prev => prev.map(i => (stateMap[i.id] ? { ...i, status: stateMap[i.id] } : i)));
       }
+      const est = await getAllEstimates();
+      setEstimates(est);
+      const [collab, assign] = await Promise.all([getCollaborators(), getAssignments()]);
+      setCollaborators(collab);
+      setAssignmentsState(assign);
     })();
   }, []);
 
@@ -117,7 +158,7 @@ const App: React.FC = () => {
 
   const updateStatus = async (itemId: string, newStatus: ItemStatus) => {
     const item = items.find(i => i.id === itemId);
-    if (!item || item.status === 'done') return;
+    if (!item) return;
 
     setLoading(itemId);
     
@@ -185,25 +226,58 @@ const App: React.FC = () => {
     setLoading(null);
   };
 
+  const bulkAssignSection = async (category: string, collaboratorId: string) => {
+    const sectionItems = items.filter(i => i.category === category);
+    for (const item of sectionItems) {
+      await setAssignment(item.id, collaboratorId);
+    }
+    setAssignmentsState(prev => {
+      const next = { ...prev };
+      sectionItems.forEach(i => { next[i.id] = collaboratorId; });
+      return next;
+    });
+  };
+
+  const bulkStatusSection = (category: string, newStatus: ItemStatus) => {
+    const sectionItems = items.filter(i => i.category === category);
+    const ids = new Set(sectionItems.map(i => i.id));
+    const nextItems = items.map(i => ids.has(i.id) ? { ...i, status: newStatus } : i);
+    setItems(nextItems);
+    persistState(nextItems);
+  };
+
   const filteredItems = items.filter(item => {
     const matchesSearch = item.label.toLowerCase().includes(searchTerm.toLowerCase()) || 
                           item.category.toLowerCase().includes(searchTerm.toLowerCase());
     const matchesFilter = activeFilter === FilterType.ALL || item.status === activeFilter;
-    return matchesSearch && matchesFilter;
+    const matchesAssigned = !assignedFilter || assignments[item.id] === assignedFilter;
+    return matchesSearch && matchesFilter && matchesAssigned;
   });
 
   return (
     <div className="min-h-screen bg-slate-50 text-slate-900 selection:bg-indigo-100 selection:text-indigo-900 pb-24 relative overflow-x-hidden">
       
-      {/* Side-over Detalhado para Itens Concluídos */}
+      {/* Side-over Detalhado (Concluídos, Fazendo ou Falta) */}
       <div className={`fixed inset-y-0 right-0 w-full max-w-lg bg-white shadow-2xl z-[100] transform transition-transform duration-500 ease-in-out border-l border-slate-200 ${selectedItem ? 'translate-x-0' : 'translate-x-full'}`}>
         {selectedItem && (
           <div className="h-full flex flex-col p-8 overflow-y-auto">
             <div className="flex justify-between items-center mb-8">
-              <div className="bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-[10px] font-black border border-emerald-100 flex items-center gap-2">
-                <CheckCircle2 size={12} />
-                IMPLEMENTAÇÃO CONCLUÍDA
-              </div>
+              {selectedItem.status === 'done' ? (
+                <div className="bg-emerald-50 text-emerald-700 px-3 py-1 rounded-full text-[10px] font-black border border-emerald-100 flex items-center gap-2">
+                  <CheckCircle2 size={12} />
+                  IMPLEMENTAÇÃO CONCLUÍDA
+                </div>
+              ) : selectedItem.status === 'doing' ? (
+                <div className="bg-amber-50 text-amber-700 px-3 py-1 rounded-full text-[10px] font-black border border-amber-200 flex items-center gap-2">
+                  <Clock size={12} />
+                  EM ANDAMENTO
+                </div>
+              ) : (
+                <div className="bg-slate-100 text-slate-600 px-3 py-1 rounded-full text-[10px] font-black border border-slate-200 flex items-center gap-2">
+                  <Target size={12} />
+                  A IMPLEMENTAR
+                </div>
+              )}
               <button 
                 onClick={() => setSelectedItem(null)}
                 className="p-2 hover:bg-slate-100 rounded-full transition-colors"
@@ -218,14 +292,80 @@ const App: React.FC = () => {
               </h2>
               <div className="flex flex-wrap items-center gap-2">
                 <span className="text-[10px] font-black text-slate-400 uppercase tracking-widest bg-slate-100 px-2 py-1 rounded">{selectedItem.category}</span>
+                {selectedItem.priority && (
+                  <span className={`text-[10px] font-black uppercase tracking-widest px-2 py-1 rounded border ${selectedItem.priority === 'Alta' ? 'bg-rose-50 border-rose-100 text-rose-600' : 'bg-slate-50 border-slate-200 text-slate-500'}`}>Prio: {selectedItem.priority}</span>
+                )}
                 <span className="text-[10px] font-black text-indigo-500 uppercase tracking-widest bg-indigo-50 px-2 py-1 rounded border border-indigo-100">Zapflow Core</span>
               </div>
             </div>
 
+            {/* Atribuído a */}
+            <div className="mb-6 p-4 rounded-2xl bg-slate-50 border border-slate-100">
+              <p className="text-[10px] font-black text-slate-500 uppercase tracking-widest mb-2 flex items-center gap-2">
+                <UserPlus size={12} /> Atribuído a
+              </p>
+              <select
+                value={assignments[selectedItem.id] ?? ''}
+                onChange={async (e) => {
+                  const val = e.target.value || null;
+                  await setAssignment(selectedItem.id, val);
+                  setAssignmentsState(prev => (val ? { ...prev, [selectedItem.id]: val } : (() => { const next = { ...prev }; delete next[selectedItem.id]; return next; })()));
+                }}
+                className="w-full px-3 py-2 rounded-xl border border-slate-200 text-sm font-medium focus:ring-2 focus:ring-indigo-500 outline-none"
+              >
+                <option value="">Nenhum responsável</option>
+                {collaborators.map(c => (
+                  <option key={c.id} value={c.id}>{c.name}{c.email ? ` (${c.email})` : ''}</option>
+                ))}
+              </select>
+            </div>
+
+            {/* Estimativas (para Fazendo e Falta) */}
+            {(selectedItem.status === 'doing' || selectedItem.status === 'pending') && (
+              <div className="mb-6 p-5 rounded-2xl bg-indigo-50 border border-indigo-100">
+                <h4 className="text-xs font-black text-indigo-700 uppercase tracking-widest mb-3 flex items-center gap-2">
+                  <Clock size={14} /> Estimativas e prazos
+                </h4>
+                <div className="grid grid-cols-2 gap-3 mb-3">
+                  {estimates[selectedItem.id]?.estimated_due_date && (
+                    <div className="flex items-center gap-2 text-sm">
+                      <Calendar size={14} className="text-indigo-500" />
+                      <span className="text-slate-700"><strong>Prazo:</strong> {new Date(estimates[selectedItem.id].estimated_due_date!).toLocaleDateString('pt-BR')}</span>
+                    </div>
+                  )}
+                  {estimates[selectedItem.id]?.estimated_time && (
+                    <div className="flex items-center gap-2 text-sm">
+                      <Clock size={14} className="text-indigo-500" />
+                      <span className="text-slate-700"><strong>Tempo est.:</strong> {estimates[selectedItem.id].estimated_time}</span>
+                    </div>
+                  )}
+                  {estimates[selectedItem.id]?.estimated_cost != null && (
+                    <div className="flex items-center gap-2 text-sm col-span-2">
+                      <DollarSign size={14} className="text-indigo-500" />
+                      <span className="text-slate-700"><strong>Custo estimado:</strong> R$ {Number(estimates[selectedItem.id].estimated_cost).toLocaleString('pt-BR', { minimumFractionDigits: 2 })}</span>
+                    </div>
+                  )}
+                </div>
+                {estimates[selectedItem.id]?.notes && (
+                  <p className="text-xs text-slate-600 border-t border-indigo-100 pt-2 mt-2"><strong>Notas:</strong> {estimates[selectedItem.id].notes}</p>
+                )}
+                {(!estimates[selectedItem.id] || (!estimates[selectedItem.id].estimated_due_date && !estimates[selectedItem.id].estimated_time && estimates[selectedItem.id].estimated_cost == null)) && (
+                  <p className="text-xs text-slate-500 italic">Nenhuma estimativa definida. Use o botão &quot;Estimar&quot; no card.</p>
+                )}
+                <button
+                  type="button"
+                  onClick={() => { setEstimateModalTask(selectedItem); setSelectedItem(null); }}
+                  className="mt-3 text-xs font-bold text-indigo-600 hover:text-indigo-800"
+                >
+                  Abrir estimativa →
+                </button>
+              </div>
+            )}
+
             <div className="space-y-6">
               <div className="bg-slate-50 rounded-3xl p-6 border border-slate-100">
                 <h4 className="text-xs font-black text-slate-400 uppercase tracking-widest mb-3 flex items-center gap-2">
-                  <Layout size={14} /> Detalhes Técnicos
+                  <Layout size={14} /> {selectedItem.status === 'done' ? 'Detalhes Técnicos' : 'O que precisa implementar'}
                 </h4>
                 <p className="text-slate-600 font-medium text-sm leading-relaxed">
                   {selectedItem.description}
@@ -255,24 +395,33 @@ const App: React.FC = () => {
                 </div>
               )}
 
-              <div className="grid grid-cols-2 gap-4">
-                <div className="p-4 rounded-2xl bg-white border border-slate-100">
-                  <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Status Final</p>
-                  <p className="text-xs font-bold text-emerald-600 flex items-center gap-2">
-                    <CheckCircle2 size={12} /> OK
+              {selectedItem.status === 'done' ? (
+                <div className="grid grid-cols-2 gap-4">
+                  <div className="p-4 rounded-2xl bg-white border border-slate-100">
+                    <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Status Final</p>
+                    <p className="text-xs font-bold text-emerald-600 flex items-center gap-2">
+                      <CheckCircle2 size={12} /> OK
+                    </p>
+                  </div>
+                  <div className="p-4 rounded-2xl bg-white border border-slate-100">
+                    <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Qualidade</p>
+                    <p className="text-xs font-bold text-slate-900">Validado em Prod</p>
+                  </div>
+                </div>
+              ) : (
+                <div className="p-4 rounded-2xl bg-amber-50 border border-amber-100">
+                  <p className="text-[10px] font-black text-amber-700 uppercase mb-1">Status atual</p>
+                  <p className="text-xs font-bold text-amber-800 flex items-center gap-2">
+                    {selectedItem.status === 'doing' ? <><Clock size={12} /> Fazendo</> : <>Falta</>}
                   </p>
                 </div>
-                <div className="p-4 rounded-2xl bg-white border border-slate-100">
-                  <p className="text-[10px] font-black text-slate-400 uppercase mb-1">Qualidade</p>
-                  <p className="text-xs font-bold text-slate-900">Validado em Prod</p>
-                </div>
-              </div>
+              )}
             </div>
 
             <div className="mt-12 pt-6 border-t border-slate-100 flex items-center justify-between text-slate-400">
               <div className="flex items-center gap-2">
                 <Lock size={14} />
-                <span className="text-[10px] font-bold uppercase tracking-widest">Ativo no Ecossistema</span>
+                <span className="text-[10px] font-bold uppercase tracking-widest">{selectedItem.status === 'done' ? 'Ativo no Ecossistema' : 'Checklist Zapflow'}</span>
               </div>
             </div>
           </div>
@@ -284,6 +433,20 @@ const App: React.FC = () => {
         <div 
           className="fixed inset-0 bg-slate-900/40 backdrop-blur-sm z-[90] transition-opacity duration-500"
           onClick={() => setSelectedItem(null)}
+        />
+      )}
+
+      <EstimateModal
+        task={estimateModalTask}
+        onClose={() => setEstimateModalTask(null)}
+        onSaved={() => getAllEstimates().then(setEstimates)}
+      />
+
+      {sidebarCollaboratorsOpen && (
+        <CollaboratorsSidebar
+          collaborators={collaborators}
+          onClose={() => setSidebarCollaboratorsOpen(false)}
+          onUpdate={() => { getCollaborators().then(setCollaborators); getAssignments().then(setAssignmentsState); }}
         />
       )}
 
@@ -301,11 +464,23 @@ const App: React.FC = () => {
               <h1 className="text-5xl font-black tracking-tight text-slate-900">Checklist de Implementação</h1>
               <button
                 type="button"
-                onClick={() => downloadChecklistPdf(items, stats.percent)}
+                onClick={() => {
+                  const list = filteredItems.length > 0 ? filteredItems : items;
+                  const pct = list.length ? Math.round((list.filter(i => i.status === 'done').length / list.length) * 100) : 0;
+                  downloadChecklistPdf(list, pct);
+                }}
                 className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-slate-900 text-white text-sm font-bold hover:bg-slate-800 transition-colors shadow-sm border border-slate-700"
               >
                 <FileDown size={18} />
                 Baixar PDF
+              </button>
+              <button
+                type="button"
+                onClick={() => setSidebarCollaboratorsOpen(true)}
+                className="flex items-center gap-2 px-4 py-2.5 rounded-xl bg-indigo-600 text-white text-sm font-bold hover:bg-indigo-700 transition-colors shadow-sm border border-indigo-700"
+              >
+                <UserPlus size={18} />
+                Colaboradores
               </button>
             </div>
 
@@ -392,37 +567,77 @@ const App: React.FC = () => {
           <ChecklistInfographic items={items} percent={stats.percent} />
         </div>
 
-        {/* Busca e Filtros */}
-        <div className="flex flex-col md:flex-row gap-4 mb-10 sticky top-6 z-40">
-          <div className="relative flex-1 group">
-            <Search className="absolute left-4 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors" size={20} />
-            <input 
-              type="text" 
-              placeholder="Pesquisar por tarefa, código ou categoria..."
-              value={searchTerm}
-              onChange={(e) => setSearchTerm(e.target.value)}
-              className="w-full pl-12 pr-4 py-4 bg-white border border-slate-200 rounded-2xl text-base shadow-xl shadow-slate-200/20 focus:ring-4 focus:ring-indigo-500/10 focus:border-indigo-500 outline-none transition-all"
-            />
-          </div>
-          <div className="flex bg-white p-1.5 rounded-2xl border border-slate-200 shadow-sm overflow-x-auto no-scrollbar">
-            {[
-              { id: FilterType.ALL, label: 'Todos' },
-              { id: FilterType.DONE, label: 'Prontos' },
-              { id: FilterType.DOING, label: 'Fazendo' },
-              { id: FilterType.PENDING, label: 'Falta' },
-            ].map(f => (
-              <button
-                key={f.id}
-                onClick={() => setActiveFilter(f.id as FilterType)}
-                className={`px-5 py-2.5 rounded-xl text-[11px] font-black transition-all uppercase tracking-widest whitespace-nowrap ${
-                  activeFilter === f.id ? 'bg-slate-900 text-white' : 'text-slate-400 hover:bg-slate-50'
-                }`}
-              >
-                {f.label}
-              </button>
-            ))}
+        {/* Busca e Filtros — um único bloco integrado */}
+        <div className="mb-10 sticky top-6 z-40 p-3 bg-white rounded-2xl border border-slate-200 shadow-sm shadow-slate-200/30">
+          <div className="flex flex-col sm:flex-row gap-3 sm:gap-0 sm:items-center">
+            <div className="relative flex-1 min-w-0">
+              <Search className="absolute left-3 top-1/2 -translate-y-1/2 text-slate-400 group-focus-within:text-indigo-500 transition-colors" size={18} />
+              <input
+                type="text"
+                placeholder="Pesquisar por tarefa, código ou categoria..."
+                value={searchTerm}
+                onChange={(e) => setSearchTerm(e.target.value)}
+                className="w-full pl-10 pr-3 py-2.5 rounded-xl border border-slate-200 text-sm focus:ring-2 focus:ring-indigo-500/20 focus:border-indigo-500 outline-none bg-slate-50/50 sm:bg-transparent"
+              />
+            </div>
+            <div className="flex flex-wrap items-center gap-1.5 sm:gap-0 sm:flex-1 sm:justify-end">
+              <div className="flex flex-wrap items-center gap-1 p-1 rounded-xl bg-slate-100/80">
+                {[
+                  { id: FilterType.ALL, label: 'Todos' },
+                  { id: FilterType.DONE, label: 'Prontos' },
+                  { id: FilterType.DOING, label: 'Fazendo' },
+                  { id: FilterType.PENDING, label: 'Falta' },
+                ].map(f => (
+                  <button
+                    key={f.id}
+                    onClick={() => setActiveFilter(f.id as FilterType)}
+                    className={`px-3 py-2 rounded-lg text-[10px] font-black transition-all uppercase tracking-wider whitespace-nowrap ${
+                      activeFilter === f.id ? 'bg-slate-900 text-white shadow-sm' : 'text-slate-500 hover:bg-white hover:text-slate-700'
+                    }`}
+                  >
+                    {f.label}
+                  </button>
+                ))}
+                {collaborators.length > 0 && (
+                  <>
+                    <span className="w-px h-4 bg-slate-300 mx-0.5 shrink-0" aria-hidden />
+                    <button
+                      type="button"
+                      onClick={() => setAssignedFilter('')}
+                      className={`px-3 py-2 rounded-lg text-[10px] font-bold transition-all shrink-0 ${
+                        !assignedFilter ? 'bg-slate-800 text-white' : 'text-slate-500 hover:bg-white hover:text-slate-700'
+                      }`}
+                    >
+                      Resp.
+                    </button>
+                    {collaborators.map((c, idx) => (
+                      <button
+                        key={c.id}
+                        type="button"
+                        onClick={() => setAssignedFilter(assignedFilter === c.id ? '' : c.id)}
+                        className={`px-3 py-2 rounded-lg text-[10px] font-bold border transition-all shrink-0 ${COLLABORATOR_COLORS[idx % COLLABORATOR_COLORS.length]} ${assignedFilter === c.id ? 'ring-2 ring-offset-1 ring-slate-400' : 'opacity-90 hover:opacity-100'}`}
+                      >
+                        {c.name}
+                      </button>
+                    ))}
+                  </>
+                )}
+              </div>
+            </div>
           </div>
         </div>
+
+        {assignedFilter && collaborators.find(c => c.id === assignedFilter) && (
+          <div className="mb-6 p-3 rounded-2xl bg-slate-100 border border-slate-200 flex items-center gap-2">
+            <span className="text-[10px] font-black text-slate-500 uppercase tracking-widest">Lista filtrada:</span>
+            <span className={`inline-flex items-center gap-1.5 px-3 py-1.5 rounded-xl text-sm font-bold border ${getCollaboratorColor(assignedFilter)}`}>
+              <UserPlus size={14} />
+              {collaborators.find(c => c.id === assignedFilter)?.name}
+            </span>
+            <span className="text-xs text-slate-500">({filteredItems.length} tarefa{filteredItems.length !== 1 ? 's' : ''})</span>
+            <button type="button" onClick={() => setAssignedFilter('')} className="ml-auto text-xs font-bold text-slate-500 hover:text-slate-700">Limpar filtro</button>
+          </div>
+        )}
 
         {/* Listagem de Tarefas Categorizada */}
         <div className="space-y-16">
@@ -432,23 +647,60 @@ const App: React.FC = () => {
 
             return (
               <section key={category} className="animate-in fade-in slide-in-from-bottom-4 duration-500">
-                <div className="flex items-center gap-4 mb-8">
-                  <div className="w-2 h-2 rounded-full bg-indigo-600 shadow-lg shadow-indigo-600/30"></div>
-                  <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.4em]">{category}</h3>
-                  <div className="h-px bg-slate-200 flex-1"></div>
+                <div className="flex flex-wrap items-center gap-3 mb-4">
+                  <div className="flex items-center gap-4 flex-1 min-w-0">
+                    <div className="w-2 h-2 rounded-full bg-indigo-600 shadow-lg shadow-indigo-600/30 shrink-0" />
+                    <h3 className="text-xs font-black text-slate-400 uppercase tracking-[0.4em]">{category}</h3>
+                    <div className="h-px bg-slate-200 flex-1 min-w-[20px]" />
+                  </div>
+                  <div className="flex flex-wrap items-center gap-2">
+                    <span className="text-[9px] font-black text-slate-400 uppercase tracking-wider">Em massa:</span>
+                    {collaborators.length > 0 && (
+                      <select
+                        value={bulkAssignByCategory[category] ?? ''}
+                        onChange={async (e) => {
+                          const v = e.target.value;
+                          if (!v) return;
+                          await bulkAssignSection(category, v);
+                          setBulkAssignByCategory(prev => ({ ...prev, [category]: '' }));
+                        }}
+                        className="appearance-none pl-2 pr-8 py-1.5 rounded-lg border border-slate-200 bg-white text-[10px] font-bold text-slate-600 cursor-pointer outline-none focus:ring-2 focus:ring-indigo-500/30"
+                      >
+                        <option value="">Atribuir todas</option>
+                        {collaborators.map(c => (
+                          <option key={c.id} value={c.id}>{c.name}</option>
+                        ))}
+                      </select>
+                    )}
+                    <select
+                      value={bulkStatusByCategory[category] ?? ''}
+                      onChange={(e) => {
+                        const v = e.target.value as ItemStatus | '';
+                        if (!v) return;
+                        bulkStatusSection(category, v);
+                        setBulkStatusByCategory(prev => ({ ...prev, [category]: '' }));
+                      }}
+                      className="appearance-none pl-2 pr-8 py-1.5 rounded-lg border border-slate-200 bg-white text-[10px] font-bold text-slate-600 cursor-pointer outline-none focus:ring-2 focus:ring-indigo-500/30"
+                    >
+                      <option value="">Status da seção</option>
+                      <option value="pending">Falta</option>
+                      <option value="doing">Fazendo</option>
+                      <option value="done">Concluir</option>
+                    </select>
+                  </div>
                 </div>
 
                 <div className="grid grid-cols-1 md:grid-cols-2 gap-5">
                   {categoryItems.map(item => (
                     <div
                       key={item.id}
-                      onClick={() => item.status === 'done' && setSelectedItem(item)}
+                      onClick={() => (item.status === 'done' || item.status === 'doing' || item.status === 'pending') && setSelectedItem(item)}
                       className={`group flex items-start gap-4 p-6 rounded-3xl border text-left transition-all relative overflow-hidden ${
                         item.status === 'done' 
                           ? 'bg-white border-emerald-100 hover:border-emerald-300 cursor-pointer shadow-sm' 
                           : item.status === 'doing'
-                          ? 'bg-amber-50/40 border-amber-200 ring-2 ring-amber-500/5'
-                          : 'bg-white border-slate-200 hover:border-indigo-200'
+                          ? 'bg-amber-50/40 border-amber-200 ring-2 ring-amber-500/5 cursor-pointer hover:ring-amber-500/15'
+                          : 'bg-white border-slate-200 hover:border-indigo-200 cursor-pointer'
                       }`}
                     >
                       {/* Borda de Status */}
@@ -481,35 +733,30 @@ const App: React.FC = () => {
                           }`}>
                             {item.label}
                           </p>
-                          {item.status === 'done' && (
-                            <ArrowRight size={14} className="text-emerald-500 opacity-0 group-hover:opacity-100 transform -rotate-45 group-hover:rotate-0 transition-all" />
+                          {(item.status === 'done' || item.status === 'doing' || item.status === 'pending') && (
+                            <ArrowRight size={14} className={`opacity-0 group-hover:opacity-100 transform -rotate-45 group-hover:rotate-0 transition-all ${item.status === 'done' ? 'text-emerald-500' : 'text-amber-500'}`} />
                           )}
                         </div>
                         
                         <div className="flex flex-wrap items-center gap-2">
-                          {/* Dropdown de Status (somente para não-concluídos) */}
-                          {item.status !== 'done' ? (
-                            <div className="relative">
-                              <select 
-                                value={item.status}
-                                onChange={(e) => updateStatus(item.id, e.target.value as ItemStatus)}
-                                onClick={(e) => e.stopPropagation()}
-                                className={`appearance-none text-[9px] font-black pl-3 pr-8 py-1 rounded-lg border uppercase tracking-widest cursor-pointer outline-none transition-all ${
-                                  item.status === 'doing' ? 'bg-amber-100 border-amber-300 text-amber-700' :
-                                  'bg-slate-100 border-slate-200 text-slate-500 hover:bg-white'
-                                }`}
-                              >
-                                <option value="pending">Falta</option>
-                                <option value="doing">Fazendo</option>
-                                <option value="done">Concluir</option>
-                              </select>
-                              <ChevronDown size={10} className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400" />
-                            </div>
-                          ) : (
-                            <div className="text-[9px] font-black px-2 py-1 rounded-lg border border-emerald-200 bg-emerald-50 text-emerald-700 uppercase tracking-widest flex items-center gap-1.5">
-                              <Lock size={10} /> Concluído
-                            </div>
-                          )}
+                          {/* Dropdown de Status (permite reverter quando concluído) */}
+                          <div className="relative">
+                            <select
+                              value={item.status}
+                              onChange={(e) => updateStatus(item.id, e.target.value as ItemStatus)}
+                              onClick={(e) => e.stopPropagation()}
+                              className={`appearance-none text-[9px] font-black pl-3 pr-8 py-1 rounded-lg border uppercase tracking-widest cursor-pointer outline-none transition-all ${
+                                item.status === 'done' ? 'bg-emerald-100 border-emerald-300 text-emerald-700' :
+                                item.status === 'doing' ? 'bg-amber-100 border-amber-300 text-amber-700' :
+                                'bg-slate-100 border-slate-200 text-slate-500 hover:bg-white'
+                              }`}
+                            >
+                              <option value="pending">Falta</option>
+                              <option value="doing">Fazendo</option>
+                              <option value="done">Concluído</option>
+                            </select>
+                            <ChevronDown size={10} className="absolute right-2.5 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400" />
+                          </div>
 
                           {item.priority && (
                             <span className={`text-[9px] font-black px-2 py-1 rounded-lg uppercase tracking-widest border ${
@@ -518,7 +765,55 @@ const App: React.FC = () => {
                               Prio: {item.priority}
                             </span>
                           )}
+                          <button
+                            type="button"
+                            onClick={(e) => { e.stopPropagation(); setEstimateModalTask(item); }}
+                            className="text-[9px] font-black px-2 py-1 rounded-lg border border-indigo-200 bg-indigo-50 text-indigo-600 hover:bg-indigo-100 uppercase tracking-widest flex items-center gap-1"
+                          >
+                            <Clock size={10} /> Estimar
+                          </button>
+                          <div className="relative" onClick={(e) => e.stopPropagation()}>
+                            <select
+                              value={assignments[item.id] ?? ''}
+                              onChange={async (e) => {
+                                const val = e.target.value || null;
+                                await setAssignment(item.id, val);
+                                setAssignmentsState(prev => (val ? { ...prev, [item.id]: val } : (() => { const next = { ...prev }; delete next[item.id]; return next; })()));
+                              }}
+                              className="appearance-none text-[9px] font-black pl-2 pr-6 py-1 rounded-lg border border-slate-200 bg-white text-slate-600 hover:bg-slate-50 uppercase tracking-wider cursor-pointer outline-none max-w-[140px]"
+                            >
+                              <option value="">Responsável</option>
+                              {collaborators.map(c => (
+                                <option key={c.id} value={c.id}>{c.name}</option>
+                              ))}
+                            </select>
+                            <UserPlus size={10} className="absolute right-2 top-1/2 -translate-y-1/2 pointer-events-none text-slate-400" />
+                          </div>
                         </div>
+                        {(assignments[item.id] && collaborators.find(c => c.id === assignments[item.id])) && (
+                          <p className="mt-1.5">
+                            <span className={`inline-flex items-center gap-1 px-2 py-0.5 rounded-lg text-[10px] font-bold border ${getCollaboratorColor(assignments[item.id])}`}>
+                              <UserPlus size={10} />
+                              {collaborators.find(c => c.id === assignments[item.id])?.name}
+                            </span>
+                          </p>
+                        )}
+                        {estimates[item.id] && (estimates[item.id].estimated_due_date || estimates[item.id].estimated_time) && (
+                          <div className="flex flex-wrap items-center gap-2 mt-2 text-[10px] text-slate-500">
+                            {estimates[item.id].estimated_due_date && (
+                              <span className="flex items-center gap-1">
+                                <Calendar size={10} />
+                                Prazo: {new Date(estimates[item.id].estimated_due_date!).toLocaleDateString('pt-BR')}
+                              </span>
+                            )}
+                            {estimates[item.id].estimated_time && (
+                              <span className="flex items-center gap-1">
+                                <Clock size={10} />
+                                Est.: {estimates[item.id].estimated_time}
+                              </span>
+                            )}
+                          </div>
+                        )}
                       </div>
 
                       {loading === item.id && (
